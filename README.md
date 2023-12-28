@@ -20,7 +20,7 @@ FlowMonitor is a library dedicated to simplifying monitoring live streams across
 </p>
 
 ![Contributors](https://img.shields.io/github/contributors/zaacksb/flow-monitor?color=dark-green) ![Issues](https://img.shields.io/github/issues/zaacksb/flow-monitor) ![License](https://img.shields.io/github/license/zaacksb/flow-monitor)
-[![npm version](https://img.shields.io/npm/v/fMonitor.svg?style=flat)](https://www.npmjs.com/package/flow-monitor)
+[![npm version](https://img.shields.io/npm/v/flow-monitor.svg?style=flat)](https://www.npmjs.com/package/flow-monitor)
 
 ## About The Project
 
