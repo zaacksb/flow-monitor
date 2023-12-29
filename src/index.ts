@@ -1,13 +1,13 @@
 import AsyncLock from 'async-lock';
 import { EventEmitter } from 'events';
-import Reconnex from 'reconnex';
+import { Reconnex } from 'reconnex';
 import { fetchTwitchData } from './fetchTwitchData';
 import { TwitchPayload, payloads, pubsubWSURL } from './twitchws';
 import { ConnectOptions, ConnectedChannels, FlowMonitorEvents, FlowMonitorOtions, LMEventTypes, LMLiveData, LMPlatforms } from './types';
 import { IBroadcastChange, IStatusChangeProps, TwitchWSMessage } from './types/twitchws';
 import { sleep } from './utils';
 import fetchVideo from './youtube/helpers';
-class FlowMonitor extends EventEmitter {
+export class FlowMonitor extends EventEmitter {
   #lock = new AsyncLock()
   #liveData: { [key: string]: LMLiveData } = {}
   #connectedChannels: ConnectedChannels[] = []
@@ -452,8 +452,6 @@ class FlowMonitor extends EventEmitter {
 
 
 }
-
-export default FlowMonitor
 
 function formatChannelName(name: string) {
   return name.replace('@', '')

@@ -41,7 +41,7 @@ npm install flow-monitor
 Import the library
 
 ```js
-import FlowMonitor from 'flow-monitor'
+import { FlowMonitor } from 'flow-monitor'
 ```
 
 instantiate the class

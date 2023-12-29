@@ -1,6 +1,6 @@
 {
   "name": "flow-monitor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A lightweight library for monitoring live streams across multiple platforms. Make it easy to follow essential events, such as the start and end of broadcasts, with real-time notifications. The perfect solution for developers looking for a simple and efficient integration for streaming management.",
   "main": "./lib/index.js",
   "files": [
@@ -24,22 +24,27 @@
     "node": ">=18.0"
   },
   "keywords": [
-    "Zacksb"
+    "stream",
+    "monitor",
+    "notifier",
+    "twitch notifier",
+    "youtube notifier",
+    "live"
   ],
   "bugs": {
     "url": "https://github.com/zaacksb/flow-monitor/issues"
   },
   "homepage": "https://github.com/zaacksb/flow-monitor#readme",
   "devDependencies": {
-    "@types/async-lock": "^1.4.2",
-    "@types/node": "^12.20.11",
+    "@types/node": "^20.10.5",
     "@types/ws": "^8.5.10",
-    "typescript": "^4.2.4"
+    "typescript": "^5.3.3",
+    "@types/async-lock": "^1.4.2"
   },
   "dependencies": {
     "async-lock": "^1.4.0",
     "axios": "^1.6.2",
-    "reconnex": "^1.0.5",
+    "reconnex": "^1.0.6",
     "ws": "^8.15.1"
   }
 }

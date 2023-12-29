@@ -12,8 +12,8 @@ dependencies:
     specifier: ^1.6.2
     version: 1.6.2
   reconnex:
-    specifier: ^1.0.5
-    version: 1.0.5
+    specifier: ^1.0.6
+    version: 1.0.6
   ws:
     specifier: ^8.15.1
     version: 8.15.1
@@ -23,14 +23,14 @@ devDependencies:
     specifier: ^1.4.2
     version: 1.4.2
   '@types/node':
-    specifier: ^12.20.11
-    version: 12.20.55
+    specifier: ^20.10.5
+    version: 20.10.5
   '@types/ws':
     specifier: ^8.5.10
     version: 8.5.10
   typescript:
-    specifier: ^4.2.4
-    version: 4.9.5
+    specifier: ^5.3.3
+    version: 5.3.3
 
 packages:
 
@@ -38,14 +38,16 @@ packages:
     resolution: {integrity: sha512-HlZ6Dcr205BmNhwkdXqrg2vkFMN2PluI7Lgr8In3B3wE5PiQHhjRqtW/lGdVU9gw+sM0JcIDx2AN+cW8oSWIcw==}
     dev: true
 
-  /@types/node@12.20.55:
-    resolution: {integrity: sha512-J8xLz7q2OFulZ2cyGTLE1TbbZcjpno7FaN6zdJNrgAdrJ+DZzh/uFR6YrTb4C+nXakvud8Q4+rbhoIWlYQbUFQ==}
+  /@types/node@20.10.5:
+    resolution: {integrity: sha512-nNPsNE65wjMxEKI93yOP+NPGGBJz/PoN3kZsVLee0XMiJolxSekEVD8wRwBUBqkwc7UWop0edW50yrCQW4CyRw==}
+    dependencies:
+      undici-types: 5.26.5
     dev: true
 
   /@types/ws@8.5.10:
     resolution: {integrity: sha512-vmQSUcfalpIq0R9q7uTo2lXs6eGIpt9wtnLdMv9LVpIjCA/+ufZRozlVoVelIYixx1ugCBKDhn89vnsEGOCx9A==}
     dependencies:
-      '@types/node': 12.20.55
+      '@types/node': 20.10.5
     dev: true
 
   /async-lock@1.4.0:
@@ -113,8 +115,8 @@ packages:
     resolution: {integrity: sha512-D+zkORCbA9f1tdWRK0RaCR3GPv50cMxcrz4X8k5LTSUD1Dkw47mKJEZQNunItRTkWwgtaUSo1RVFRIG9ZXiFYg==}
     dev: false
 
-  /reconnex@1.0.5:
-    resolution: {integrity: sha512-Cgui02Uj7M+wRN0E2HgEtSXuJIxYGJh91ZKmDq9Lzghqt5ZqsQig1CXk5KMXuSFnCKmMzjaJzOPPb2oX/ricXQ==}
+  /reconnex@1.0.6:
+    resolution: {integrity: sha512-7zvLvOjUmfYn7xtp/gfxX9U5S1Ac3P9WSmo9mXElxSMboXRC9QVlY0+nDiAUpim9bkK4ZxyZBF8tKYMO3Jjv8g==}
     dependencies:
       ws: 8.15.1
     transitivePeerDependencies:
@@ -122,10 +124,14 @@ packages:
       - utf-8-validate
     dev: false
 
-  /typescript@4.9.5:
-    resolution: {integrity: sha512-1FXk9E2Hm+QzZQ7z+McJiHL4NW1F2EzMu9Nq9i3zAaGqibafqYwCVU6WyWAuyQRRzOlxou8xZSyXLEN8oKj24g==}
-    engines: {node: '>=4.2.0'}
+  /typescript@5.3.3:
+    resolution: {integrity: sha512-pXWcraxM0uxAS+tN0AG/BF2TyqmHO014Z070UsJ+pFvYuRSq8KH8DmWpnbXe0pEPDHXZV3FcAbJkijJ5oNEnWw==}
+    engines: {node: '>=14.17'}
     hasBin: true
+    dev: true
+
+  /undici-types@5.26.5:
+    resolution: {integrity: sha512-JlCMO+ehdEIKqlFxk6IfVoAUVmgz7cU7zD/h9XZ0qzeosSHmUJVOzSQvvYSYWXkFXC+IfLKSIffhv0sVZup6pA==}
     dev: true
 
   /ws@8.15.1:
