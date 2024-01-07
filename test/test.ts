@@ -1,5 +1,5 @@
 
-import FlowMonitor from '../src';
+import { FlowMonitor } from '../src';
 
 const fMonitor = new FlowMonitor({
   twitch: {

@@ -92,7 +92,7 @@ export class FlowMonitor extends EventEmitter {
     }
   }
 
-  private emitLiveData({ category, channel, platform, started_at, thumbnail, title, viewers, vodId, event, m3u8Url }: LMLiveData & { event: LMEventTypes }) {
+  private emitLiveData({ category, channel, platform, started_at, thumbnail, title, viewers, vodId, event, m3u8Url, id }: LMLiveData & { event: LMEventTypes }) {
     this.emit(event, {
       category: {
         id: category?.id,
@@ -107,6 +107,7 @@ export class FlowMonitor extends EventEmitter {
       viewers: viewers,
       vodId: vodId,
       m3u8Url,
+      id
     } as LMLiveData)
   }
 
@@ -207,8 +208,7 @@ export class FlowMonitor extends EventEmitter {
         platform,
         thumbnail,
         m3u8Url,
-
-
+        id: generateUUID()
       } as LMLiveData
 
       Object.assign(this.#liveData, { [`${channel}.${platform}`]: channelData });
@@ -282,7 +282,8 @@ export class FlowMonitor extends EventEmitter {
                   channel: login,
                   platform: channel?.platform,
                   thumbnail,
-                  m3u8Url
+                  m3u8Url,
+                  id: generateUUID()
                 } as LMLiveData
                 Object.assign(this.#liveData, { [`${login}.${channel?.platform}`]: channelData });
                 this.emitLiveData({
@@ -425,7 +426,8 @@ export class FlowMonitor extends EventEmitter {
               channel: channel.user,
               platform: 'youtube',
               thumbnail: `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
-              m3u8Url: `${live?.hlsManifestUrl}`
+              m3u8Url: `${live?.hlsManifestUrl}`,
+              id: generateUUID()
             } as LMLiveData
 
             Object.assign(this.#liveData, { [`${channel.user}.youtube`]: channelData });
@@ -455,4 +457,10 @@ export class FlowMonitor extends EventEmitter {
 
 function formatChannelName(name: string) {
   return name.replace('@', '')
+}
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+    var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
 }

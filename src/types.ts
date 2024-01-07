@@ -41,6 +41,7 @@ export type LMLiveData = {
   started_at: string
   vodId: string
   m3u8Url?: string
+  id: string
 }
 
 export type LiveDataChangeEvent = (liveData: LMLiveData) => void
