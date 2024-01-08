@@ -48,7 +48,7 @@ fMonitor.on('close', () => {
   console.log('bgl foi fechado')
 })
 fMonitor.connect('@LofiGirl', 'youtube')
-fMonitor.connect('pedrosemfreio', 'twitch')
+// fMonitor.connect('pedrosemfreio', 'twitch')
 
 fMonitor.start()
 // console.log(fMonitor.livedata('@LofiGirl', 'youtube'))

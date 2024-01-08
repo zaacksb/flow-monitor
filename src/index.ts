@@ -92,7 +92,7 @@ export class FlowMonitor extends EventEmitter {
     }
   }
 
-  private emitLiveData({ category, channel, platform, started_at, thumbnail, title, viewers, vodId, event, m3u8Url, id }: LMLiveData & { event: LMEventTypes }) {
+  private emitLiveData({ category, channel, platform, started_at, thumbnail, title, viewers, vodId, event, m3u8Url, id, userId }: LMLiveData & { event: LMEventTypes }) {
     this.emit(event, {
       category: {
         id: category?.id,
@@ -100,6 +100,7 @@ export class FlowMonitor extends EventEmitter {
         name: category?.name
       },
       channel,
+      userId,
       platform,
       started_at: started_at,
       thumbnail: thumbnail,
@@ -205,6 +206,7 @@ export class FlowMonitor extends EventEmitter {
         title: String(title),
         viewers: viewersCount || 0,
         channel,
+        userId: String(userId || channel),
         platform,
         thumbnail,
         m3u8Url,
@@ -280,6 +282,7 @@ export class FlowMonitor extends EventEmitter {
                   title: String(title),
                   viewers: viewersCount || 0,
                   channel: login,
+                  userId: String(userId || channel),
                   platform: channel?.platform,
                   thumbnail,
                   m3u8Url,
@@ -414,7 +417,7 @@ export class FlowMonitor extends EventEmitter {
           }
         }
       } else {
-        const { category, live, title, reason, status, videoId, error, code } = await fetchVideo(channel.user)
+        const { category, live, title, reason, status, videoId, error, code, channelId } = await fetchVideo(channel.user)
         if (!code || code !== 'network_error') {
           if (live?.isLiveNow && !reason && status !== 'ERROR') {
             const channelData = {
@@ -424,6 +427,7 @@ export class FlowMonitor extends EventEmitter {
               title,
               viewers: live?.viewers || 0,
               channel: channel.user,
+              userId: channelId,
               platform: 'youtube',
               thumbnail: `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
               m3u8Url: `${live?.hlsManifestUrl}`,

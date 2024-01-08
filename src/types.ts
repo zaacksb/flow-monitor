@@ -34,6 +34,7 @@ export type LMLiveData = {
   event?: LMEventTypes
   platform: LMPlatforms
   channel: string
+  userId: string
   title: string
   category: LMCategory
   viewers: number
