@@ -1,6 +1,6 @@
 {
   "name": "flow-monitor",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A lightweight library for monitoring live streams across multiple platforms. Make it easy to follow essential events, such as the start and end of broadcasts, with real-time notifications. The perfect solution for developers looking for a simple and efficient integration for streaming management.",
   "main": "./lib/index.js",
   "files": [
