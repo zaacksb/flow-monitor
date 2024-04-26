@@ -359,13 +359,46 @@ export class FlowMonitor extends EventEmitter {
     })
   }
 
-  private async youtubeChecker() {
-    for (const channel of this.#youtubeChannelsChecker) {
+  public async fetchTwitch(user: string, notifier = false) {
+    const { login, categoryId, categoryImage, categoryName, started_at, streamId, title, viewersCount, thumbnail, m3u8Url, userId } = await fetchTwitchData(user)
+    if (started_at && m3u8Url) {
+      const channelData = {
+        category: {
+          id: String(categoryId),
+          image: categoryImage,
+          name: categoryName
+        },
+        started_at,
+        vodId: String(streamId),
+        title: String(title),
+        viewers: viewersCount || 0,
+        channel: login,
+        userId: String(userId || user),
+        platform: 'twitch',
+        thumbnail,
+        m3u8Url,
+        id: generateUUID()
+      } as LMLiveData
+      if (notifier) {
+        Object.assign(this.#liveData, { [`${login}.twitch`]: channelData });
+        this.emitLiveData({
+          event: 'streamUp',
+          ...channelData
+        })
+      }
+
+      return channelData
+
+    }
+  }
+  public async fetchYoutube(user: string) {
+    const channel = this.#youtubeChannelsChecker.find(chn => chn.user === user)
+    if (channel) {
       if (channel.live) {
         const { reason, status, title, category, live, videoId, error, code } = await fetchVideo(channel.user, this.#youtubehHeaders)
         if (!code || code !== 'network_error') {
           const currentData = this.#liveData[`${channel.user}.youtube`]
-          if (reason || status == 'ERROR' || (videoId && videoId !== currentData.vodId)) {
+          if (reason || status == 'ERROR' || (videoId && videoId !== currentData?.vodId)) {
             this.emitLiveData({
               event: 'streamDown',
               ...currentData
@@ -380,7 +413,7 @@ export class FlowMonitor extends EventEmitter {
               })
             })
           } else {
-            if (live?.viewers && currentData.viewers !== live.viewers) {
+            if (live?.viewers && currentData?.viewers !== live.viewers) {
               const channelData = {
                 ...currentData,
                 viewers: live.viewers
@@ -417,7 +450,7 @@ export class FlowMonitor extends EventEmitter {
           }
         }
       } else {
-        const { category, live, title, reason, status, videoId, error, code, channelId } = await fetchVideo(channel.user)
+        const { category, live, title, reason, status, videoId, error, code, channelId } = await fetchVideo(user)
         if (!code || code !== 'network_error') {
           if (live?.isLiveNow && !reason && status !== 'ERROR') {
             const channelData = {
@@ -426,7 +459,7 @@ export class FlowMonitor extends EventEmitter {
               vodId: videoId,
               title,
               viewers: live?.viewers || 0,
-              channel: channel.user,
+              channel: user,
               userId: channelId,
               platform: 'youtube',
               thumbnail: `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
@@ -434,14 +467,14 @@ export class FlowMonitor extends EventEmitter {
               id: generateUUID()
             } as LMLiveData
 
-            Object.assign(this.#liveData, { [`${channel.user}.youtube`]: channelData });
+            Object.assign(this.#liveData, { [`${user}.youtube`]: channelData });
             this.emitLiveData({
               event: 'streamUp',
               ...channelData
             })
             this.#lock.acquire('lm', () => {
               this.#youtubeChannelsChecker = this.#youtubeChannelsChecker.filter(chn => {
-                if (chn.user == channel.user) {
+                if (chn.user == user) {
                   chn.live = true
                 }
                 return chn
@@ -451,10 +484,17 @@ export class FlowMonitor extends EventEmitter {
         }
       }
     }
+  }
+
+  private async youtubeChecker() {
+    for (const channel of this.#youtubeChannelsChecker) {
+      this.fetchYoutube(channel.user)
+    }
     await sleep(this.#youtubeIntervalChecker)
     if (!this.#youtubeCheckerConnected) return
     this.youtubeChecker()
   }
+
 
 
 }

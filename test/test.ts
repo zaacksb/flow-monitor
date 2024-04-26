@@ -19,7 +19,7 @@ fMonitor.on('twitchError', (error, status, message) => {
 })
 
 fMonitor.on('start', () => {
-  console.log('bgl iniciou mané')
+
 })
 
 fMonitor.on('newChannel', ({ name, platform }) => {
@@ -45,7 +45,7 @@ fMonitor.on('disconnectChannel', ({ name, platform }) => {
   console.log('channel disconnected', name, platform)
 })
 fMonitor.on('close', () => {
-  console.log('bgl foi fechado')
+
 })
 fMonitor.connect('@LofiGirl', 'youtube')
 // fMonitor.connect('pedrosemfreio', 'twitch')
