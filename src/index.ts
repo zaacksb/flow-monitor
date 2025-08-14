@@ -1,510 +1,438 @@
-import AsyncLock from 'async-lock';
-import { EventEmitter } from 'events';
+import EventEmitter from 'eventemitter3';
 import { Reconnex } from 'reconnex';
-import { fetchTwitchData } from './fetchTwitchData';
-import { TwitchPayload, payloads, pubsubWSURL } from './twitchws';
-import { ConnectOptions, ConnectedChannels, FlowMonitorEvents, FlowMonitorOtions, LMEventTypes, LMLiveData, LMPlatforms } from './types';
-import { IBroadcastChange, IStatusChangeProps, TwitchWSMessage } from './types/twitchws';
-import { sleep } from './utils';
-import fetchVideo from './youtube/helpers';
-export class FlowMonitor extends EventEmitter {
-  #lock = new AsyncLock()
-  #liveData: { [key: string]: LMLiveData } = {}
-  #connectedChannels: ConnectedChannels[] = []
-
-  #youtubeChannelsChecker: { user: string, live: boolean }[] = []
-  #youtubeIntervalChecker: number = 5 * 1000
-  #twitchHeaders? = {}
-  #youtubehHeaders? = {}
-  #youtubeCheckerConnected = false
-
-  #twitchWSConnected = false
-  #startedChecker = false
-
-  #zTwSocket = new Reconnex({
-    url: pubsubWSURL,
-    ping: {
-      data: '{"type":"PING"}',
-      interval: 3 * 60 * 1000
-    },
-    reconnect: {
-      maxAttempts: -1
-    }
-  })
-  constructor({ youtube, twitch }: FlowMonitorOtions = {}) {
-    super()
-    this.#youtubeIntervalChecker = youtube?.intervalChecker || 5 * 1000
-    this.#twitchHeaders = twitch?.headers
-    this.#youtubehHeaders = youtube?.headers
-
-  }
-  on<E extends keyof FlowMonitorEvents>(event: E, listener: FlowMonitorEvents[E]): this {
-    return super.on(event, listener);
-  }
-
-  private setCheckerConnected(channel: string, connected: boolean, platform: LMPlatforms) {
-    this.#lock.acquire('lm', () => {
-      this.#connectedChannels = this.#connectedChannels.filter(chn => {
-        if (chn.channel == channel && chn.platform == platform) {
-          chn.checkerConnected = connected
-        }
-        return chn
-      })
-    })
-  }
-
-  public connect(channel: string, platform: LMPlatforms) {
-    const channelIsConnected = this.#connectedChannels.find(chn => chn.channel == channel && chn.platform == platform)
-    if (!channelIsConnected) {
-      this.emit('newChannel', { name: channel, platform })
-      this.#connectedChannels.push({
-        channel: formatChannelName(channel),
-        platform
-      })
-    }
-  }
-  public livedata(channel: string, platform: LMPlatforms): LMLiveData | undefined {
-    return this.#liveData[`${channel}.${platform}`]
-  }
-  public disconnect(channel: string, platform: LMPlatforms) {
-    channel = formatChannelName(channel)
-    const channelIsConnected = this.#connectedChannels.find(chn => chn.channel == channel && chn.platform == platform)
-    if (channelIsConnected) {
-      this.#lock.acquire('lm', () => {
-        this.#connectedChannels = this.#connectedChannels.filter(chn => chn.channel !== channel && chn.platform !== platform)
-        if (channelIsConnected.checkerConnected) {
-          if (channelIsConnected.platform == 'twitch') {
-            this.twitchSubUnsubWSEvents({
-              channel: channel,
-              platform,
-              event: 'UNLISTEN'
-            })
-          } else if (channelIsConnected.platform == 'youtube') {
-            this.emit('disconnectChannel', {
-              name: channelIsConnected.channel,
-              platform: channelIsConnected.platform
-            })
-            this.#youtubeChannelsChecker = this.#youtubeChannelsChecker.filter(({ user }) => user !== channelIsConnected.channel)
-            delete this.#liveData[`${channelIsConnected.channel}.${channelIsConnected.platform}`]
-          }
-        }
-      })
-    }
-  }
-
-  private emitLiveData({ category, channel, platform, started_at, thumbnail, title, viewers, vodId, event, m3u8Url, id, userId }: LMLiveData & { event: LMEventTypes }) {
-    this.emit(event, {
-      category: {
-        id: category?.id,
-        image: category?.image,
-        name: category?.name
-      },
-      channel,
-      userId,
-      platform,
-      started_at: started_at,
-      thumbnail: thumbnail,
-      title,
-      viewers: viewers,
-      vodId: vodId,
-      m3u8Url,
-      id
-    } as LMLiveData)
-  }
+import { LogLevel, Logger } from './lib/Logger';
+import { payloads, pubsubWSURL } from './lib/twitch/ws';
+import { FMCategory, FMLiveData, FMPlatforms } from './lib/types';
+import { RecursivePartial, sleep } from './lib/utils';
+import { FetchTwitchData, fetchTwitchDataFN, getTwitchPlaylist } from './lib/twitch/fetchTwitchData';
+import { Queue } from './lib/Queue';
+import { IBroadcastChange, IStatusChangeProps, TwitchWSMessage } from './lib/twitch/types';
+import { StreamUtils } from './lib/Stream';
+import fetchVideo, { Youtube } from './lib/youtube/helpers';
 
 
-  private async connectTwWebsocket() {
-    this.#twitchWSConnected = true
-
-
-    if (!this.#zTwSocket.isConnected()) this.#zTwSocket.open()
-  }
-
-  public start() {
-    if (this.#startedChecker) return
-    this.#startedChecker = true
-    this.emit('start')
-    this.addTwitchListeners()
-    let cInterval = setInterval(async () => {
-      const channels = this.#connectedChannels.filter(chn => !chn.checkerConnected)
-      channels.forEach(async ({ channel, platform, checkerConnected }) => {
-        if (platform == 'twitch') {
-          if (!this.#zTwSocket?.isConnected()) {
-            this.connectTwWebsocket()
-          }
-          if (!checkerConnected) {
-            this.setCheckerConnected(channel, true, platform)
-            this.#zTwSocket?.waitTwitchWSConnected().then(() => {
-              this.twitchSubUnsubWSEvents({
-                channel: channel,
-                platform: platform,
-                event: 'LISTEN'
-              })
-            })
-          }
-        } else if (platform == 'youtube') {
-          if (!this.#youtubeCheckerConnected) {
-            this.#youtubeCheckerConnected = true
-            this.youtubeChecker()
-          }
-          if (!checkerConnected) {
-            this.setCheckerConnected(channel, true, platform)
-
-            const ytCheckerConnected = this.#youtubeChannelsChecker.find(({ user }) => user == channel)
-            if (!ytCheckerConnected) {
-              this.#youtubeChannelsChecker.push({
-                user: channel,
-                live: false
-              })
-            }
-          }
-        }
-
-
-
-      })
-      if (!this.#startedChecker) clearInterval(cInterval)
-    }, 100)
-  }
-
-  public close() {
-    this.emit('close')
-    this.#startedChecker = false
-    this.#liveData = {}
-    this.#twitchWSConnected = false
-    this.#zTwSocket?.disconnect()
-    this.#youtubeChannelsChecker = []
-  }
-
-  private async twitchSubUnsubWSEvents({ channel, platform, event, streamDown }: { event: TwitchPayload, streamDown?: boolean } & Pick<ConnectOptions, 'channel' | 'platform'>) {
-    const { login, categoryId, categoryImage, categoryName, started_at, streamId, title, userId, viewersCount, thumbnail, m3u8Url, code, error, message, status } = await fetchTwitchData(channel, this.#twitchHeaders)
-    if (error) {
-      this.emit('twitchError', error, status, message)
-    }
-
-    if (login) {
-      if (!streamDown) {
-        if (event == 'LISTEN') {
-          this.#zTwSocket?.sendOnConnect(payloads.gameBroadcaster(String(userId), event))
-          this.#zTwSocket?.sendOnConnect(payloads.videoPlayBack(String(userId), event))
-        } else {
-          this.#zTwSocket?.send(payloads.gameBroadcaster(String(userId), event))
-          this.#zTwSocket?.send(payloads.videoPlayBack(String(userId), event))
-
-          this.#zTwSocket?.removeSendOnConnect(payloads.gameBroadcaster(String(userId), 'LISTEN'))
-          this.#zTwSocket?.removeSendOnConnect(payloads.videoPlayBack(String(userId), 'LISTEN'))
-        }
-      }
-      const channelData = {
-        category: {
-          id: String(categoryId),
-          image: categoryImage,
-          name: categoryName
-        },
-        started_at,
-        vodId: String(streamId),
-        title: String(title),
-        viewers: viewersCount || 0,
-        channel,
-        userId: String(userId || channel),
-        platform,
-        thumbnail,
-        m3u8Url,
-        id: generateUUID()
-      } as LMLiveData
-
-      Object.assign(this.#liveData, { [`${channel}.${platform}`]: channelData });
-      this.#lock.acquire('lm', () => {
-        this.#connectedChannels = this.#connectedChannels.map(chn => {
-          if (chn.channel == channel) {
-            chn.userId = String(userId)
-          }
-          return chn
-        })
-      })
-      if (streamId && streamId > 0 && event !== 'UNLISTEN') this.emitLiveData({
-        event: 'streamUp',
-        ...channelData
-      })
-      if (event == 'UNLISTEN') {
-        delete this.#liveData[`${channel}.${platform}`]
-      }
-      if (streamDown) {
-        this.emitLiveData({
-          event: 'streamDown',
-          ...channelData
-        })
-        return
-      }
-
-      if (event == 'UNLISTEN') {
-        this.emit('disconnectChannel', {
-          name: login,
-          platform: 'twitch'
-        })
-      }
-    }
-  }
-  private getTwChannelById(userId: string) {
-    return this.#connectedChannels.find(chn => chn.userId === userId)
-  }
-
-  private addTwitchListeners() {
-    this.#zTwSocket.on('text', (text) => {
-
-
-      const wsMessage: TwitchWSMessage = JSON.parse(text.toString()) || {}
-      if (wsMessage.type === "MESSAGE") {
-        const { topic, message } = wsMessage.data
-        const [payload, userId] = topic.split(".")
-        const channel = this.getTwChannelById(userId)
-        const userLiveData = this.#liveData[`${channel?.channel}.${channel?.platform}`]
-        if (payload == "video-playback-by-id") {
-          const status: IStatusChangeProps = JSON.parse(message)
-          if (status.type == 'stream-up') {
-            let timeoutStreamId = setTimeout(() => {
-              clearInterval(waitForStreamId)
-            }, 10 * 1000)
-
-            let waitForStreamId = setInterval(async () => {
-              const { login, categoryId, categoryImage, categoryName, started_at, streamId, title, viewersCount, thumbnail, m3u8Url } = await fetchTwitchData(String(channel?.channel))
-              if (started_at && m3u8Url) {
-                clearTimeout(timeoutStreamId)
-                clearInterval(waitForStreamId)
-                const channelData = {
-                  category: {
-                    id: String(categoryId),
-                    image: categoryImage,
-                    name: categoryName
-                  },
-                  started_at,
-                  vodId: String(streamId),
-                  title: String(title),
-                  viewers: viewersCount || 0,
-                  channel: login,
-                  userId: String(userId || channel),
-                  platform: channel?.platform,
-                  thumbnail,
-                  m3u8Url,
-                  id: generateUUID()
-                } as LMLiveData
-                Object.assign(this.#liveData, { [`${login}.${channel?.platform}`]: channelData });
-                this.emitLiveData({
-                  event: 'streamUp',
-                  ...channelData
-                })
-              }
-
-            }, 1000)
-
-          }
-          if (status.type == 'stream-down' && channel) {
-            this.twitchSubUnsubWSEvents({
-              channel: channel.channel,
-              platform: channel.platform,
-              event: 'UNLISTEN',
-              streamDown: true
-            })
-          } else if (status.type == 'viewcount' && channel && userLiveData) {
-            const { viewers, channel: channelName } = this.#liveData[`${channel.channel}.${channel.platform}`]
-            if (viewers !== status.viewers) {
-              Object.assign(this.#liveData, {
-                [`${channelName}.${channel.platform}`]: {
-                  ...this.#liveData[`${channel.channel}.${channel.platform}`],
-                  viewers: status.viewers
-                }
-              })
-              this.emitLiveData({
-                event: 'viewerCount',
-                ...this.#liveData[`${channel.channel}.${channel.platform}`]
-              })
-            }
-          }
-        } else if (payload == 'broadcast-settings-update' && channel && userLiveData) {
-          const { channel: channelName, game, game_id, old_game, old_status, status }: IBroadcastChange = JSON.parse(message)
-
-
-          if (game !== old_game) {
-            Object.assign(this.#liveData, {
-              [`${channelName}.${channel.platform}`]: {
-                ...this.#liveData[`${channel.channel}.${channel.platform}`],
-                category: {
-                  id: String(game_id),
-                  image: `https://static-cdn.jtvnw.net/ttv-boxart/${game_id}-144x192.jpg`,
-                  name: game
-                }
-              }
-            })
-            this.emitLiveData({
-              event: 'category',
-              ...this.#liveData[`${channelName}.${channel.platform}`],
-            })
-          }
-          if (status !== old_status) {
-            Object.assign(this.#liveData, {
-              [`${channelName}.${channel.platform}`]: {
-                ...this.#liveData[`${channel.channel}.${channel.platform}`],
-                title: status
-              }
-            })
-            this.emitLiveData({
-              event: 'title',
-              ...this.#liveData[`${channelName}.${channel.platform}`]
-            })
-          }
-        }
-
-
-      }
-    })
-  }
-
-  public async fetchTwitch(user: string, notifier = false) {
-    const { login, categoryId, categoryImage, categoryName, started_at, streamId, title, viewersCount, thumbnail, m3u8Url, userId } = await fetchTwitchData(user)
-    if (started_at && m3u8Url) {
-      const channelData = {
-        category: {
-          id: String(categoryId),
-          image: categoryImage,
-          name: categoryName
-        },
-        started_at,
-        vodId: String(streamId),
-        title: String(title),
-        viewers: viewersCount || 0,
-        channel: login,
-        userId: String(userId || user),
-        platform: 'twitch',
-        thumbnail,
-        m3u8Url,
-        id: generateUUID()
-      } as LMLiveData
-      if (notifier) {
-        Object.assign(this.#liveData, { [`${login}.twitch`]: channelData });
-        this.emitLiveData({
-          event: 'streamUp',
-          ...channelData
-        })
-      }
-
-      return channelData
-
-    }
-  }
-  public async fetchYoutube(user: string) {
-    const channel = this.#youtubeChannelsChecker.find(chn => chn.user === user)
-    if (channel) {
-      if (channel.live) {
-        const { reason, status, title, category, live, videoId, error, code } = await fetchVideo(channel.user, this.#youtubehHeaders)
-        if (!code || code !== 'network_error') {
-          const currentData = this.#liveData[`${channel.user}.youtube`]
-          if (reason || status == 'ERROR' || (videoId && videoId !== currentData?.vodId)) {
-            this.emitLiveData({
-              event: 'streamDown',
-              ...currentData
-            })
-            delete this.#liveData[`${channel.user}.youtube`]
-            this.#lock.acquire('lm', () => {
-              this.#youtubeChannelsChecker = this.#youtubeChannelsChecker.filter((chn) => {
-                if (chn.user == chn.user) {
-                  chn.live = false
-                }
-                return chn
-              })
-            })
-          } else {
-            if (live?.viewers && currentData?.viewers !== live.viewers) {
-              const channelData = {
-                ...currentData,
-                viewers: live.viewers
-              } as LMLiveData
-
-              Object.assign(this.#liveData, { [`${channel.user}.youtube`]: channelData });
-              this.emitLiveData({
-                event: 'viewerCount',
-                ...channelData
-              })
-            } else if (title && title !== currentData.title) {
-              const channelData = {
-                ...currentData,
-                title
-              } as LMLiveData
-
-              Object.assign(this.#liveData, { [`${channel.user}.youtube`]: channelData });
-              this.emitLiveData({
-                event: 'title',
-                ...channelData
-              })
-            } else if (category?.name && category.name !== currentData.category.name) {
-              const channelData = {
-                ...currentData,
-                category
-              } as LMLiveData
-
-              Object.assign(this.#liveData, { [`${channel.user}.youtube`]: channelData });
-              this.emitLiveData({
-                event: 'category',
-                ...channelData
-              })
-            }
-          }
-        }
-      } else {
-        const { category, live, title, reason, status, videoId, error, code, channelId } = await fetchVideo(user)
-        if (!code || code !== 'network_error') {
-          if (live?.isLiveNow && !reason && status !== 'ERROR') {
-            const channelData = {
-              category,
-              started_at: String(live?.startTimestamp),
-              vodId: videoId,
-              title,
-              viewers: live?.viewers || 0,
-              channel: user,
-              userId: channelId,
-              platform: 'youtube',
-              thumbnail: `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`,
-              m3u8Url: `${live?.hlsManifestUrl}`,
-              id: generateUUID()
-            } as LMLiveData
-
-            Object.assign(this.#liveData, { [`${user}.youtube`]: channelData });
-            this.emitLiveData({
-              event: 'streamUp',
-              ...channelData
-            })
-            this.#lock.acquire('lm', () => {
-              this.#youtubeChannelsChecker = this.#youtubeChannelsChecker.filter(chn => {
-                if (chn.user == user) {
-                  chn.live = true
-                }
-                return chn
-              })
-            })
-          }
-        }
-      }
-    }
-  }
-
-  private async youtubeChecker() {
-    for (const channel of this.#youtubeChannelsChecker) {
-      this.fetchYoutube(channel.user)
-    }
-    await sleep(this.#youtubeIntervalChecker)
-    if (!this.#youtubeCheckerConnected) return
-    this.youtubeChecker()
-  }
-
-
-
+interface ClientOptions {
+	log?: Logger;
+	youtube?: {
+		intervalChecker: number
+		headers?: HeadersInit
+	}
+	twitch?: {
+		headers?: HeadersInit
+	}
 }
 
-function formatChannelName(name: string) {
-  return name.replace('@', '')
+export type FlowMonitorEvents = {
+	streamUp: [channel: Omit<Channel, 'streams'>, vod: Stream]
+	streamDown: [channel: Omit<Channel, 'streams'>, vod: Stream]
+	viewCount: [channel: Omit<Channel, 'streams'>, vod: Stream, count: number]
+	category: [channel: Omit<Channel, 'streams'>, vod: Stream, newcategory: FMCategory]
+	title: [channel: Omit<Channel, 'streams'>, vod: Stream, newTitle: string]
+	thumbnail: [channel: Omit<Channel, 'streams'>, vod: Stream, thumbnail: string]
+	twitchSocketOpen: [uri: string];
+	twitchSocketClose: [code: number, reason?: string];
+	connected: [channel: Channel];
+	disconnected: [channel: Channel];
+	close: [code: number, reason: string, wasClean: boolean];
+	closeTwitch: [reason: string];
+	error: [event: string];
+};
+
+type Stream = Omit<FMLiveData, 'event'>
+type Streams = Map<string, Stream>
+type Channel = {
+	monitoring?: boolean,
+	platform: FMPlatforms
+	username: string
+	userId: string
+	streams: Streams
 }
-function generateUUID() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-    var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
+type Channels = Map<FMPlatforms, Map<string, Partial<Channel>>>
+export class FlowMonitor extends EventEmitter<FlowMonitorEvents> {
+	private log?: Logger;
+	private queue = new Queue({ concurrency: 1 });
+	public channels: Channels
+	private youtubeCheckerEnabled = false
+	private twitchReconnex
+	private youtube: NonNullable<ClientOptions['youtube']>
+	private twitch: ClientOptions['twitch']
+	constructor(opts: ClientOptions = {}) {
+		super()
+		this.log = opts.log ?? new Logger(LogLevel.Fatal);
+		this.channels = new Map()
+		this.channels.set('twitch', new Map())
+		this.channels.set('youtube', new Map())
+		this.twitch = opts.twitch || {}
+		this.twitchReconnex = new Reconnex({
+			url: pubsubWSURL,
+			ping: {
+				data: '{"type":"PING"}',
+				interval: 3 * 60 * 1000
+			},
+			reconnect: {
+				maxAttempts: Infinity
+			}
+		})
+		this.youtube = {
+			headers: opts.youtube?.headers || new Headers(),
+			intervalChecker: opts.youtube?.intervalChecker || 5_000
+		}
+		this.twitchReconnex.on('close', (code, reason) => {
+			this.emit('twitchSocketClose', code, reason?.toString())
+		})
+		this.twitchReconnex.on('open', (url) => {
+			this.emit('twitchSocketOpen', url)
+		})
+		this.twitchReconnex.on('text', async (text) => {
+
+			const wsMessage: TwitchWSMessage = JSON.parse(text || '{}')
+			if (wsMessage.type === "MESSAGE") {
+				const { topic, message } = wsMessage.data
+				const [payload, userId] = topic.split(".")
+				const channel = this.getChannelByUID('twitch', userId)
+				if (!channel) return
+				const userLiveData = channel.streams.values().next().value as Stream
+				if (payload == "video-playback-by-id") {
+					const status: IStatusChangeProps = JSON.parse(message)
+					if (status.type == 'stream-up') {
+						const waitForStreamId = async () => {
+							const success = await this.twitchStreamUp(channel.username)
+							if (!success) setTimeout(waitForStreamId, 1_000)
+						}
+						waitForStreamId()
+					}
+					if (status.type == 'stream-down') {
+						this.updateStreamData('twitch', channel?.username, userLiveData?.vodId, { ...userLiveData, started_at: 'nullx' })
+					} else if (status.type == 'viewcount' && userLiveData) {
+						userLiveData?.vodId && this.updateStreamData('twitch', channel?.username, userLiveData?.vodId, { ...userLiveData, viewers: status.viewers })
+					}
+				} else if (payload == 'broadcast-settings-update') {
+					const { game, game_id, old_game, old_status, status, }: IBroadcastChange = JSON.parse(message)
+					if (game !== old_game) {
+						const category = {
+							id: String(game_id),
+							image: `https://static-cdn.jtvnw.net/ttv-boxart/${game_id}-144x192.jpg`,
+							name: game
+						} satisfies FMCategory
+						userLiveData?.vodId && this.pushLiveCategory('twitch', channel?.username, userLiveData.vodId, category)
+					}
+					if (status !== old_status) {
+						userLiveData?.vodId && this.updateStreamData('twitch', channel?.username, userLiveData.vodId, { ...userLiveData, title: status })
+					}
+				}
+
+
+			}
+		})
+	}
+
+	private pushLiveCategory(platform: FMPlatforms, channel: string, vodId: string, category: FMCategory) {
+		const userLiveData = this.getVodData(platform, channel, vodId)
+		if (userLiveData) {
+			userLiveData.category.push(category)
+			this.updateStreamData(platform, channel, vodId, userLiveData)
+		}
+	}
+	private updateStreamData(platform: FMPlatforms, channel: string, vodId: string, data: Stream) {
+		const oldData = this.getVodData(platform, channel, vodId)
+		const newData = { ...oldData, ...data }
+		this.channels.get(platform)?.get(channel)!?.streams!.set(vodId, newData)
+		const dataSave = this.getChannel(platform, channel)!
+		if (!dataSave) return
+		const { streams, ...channelData } = dataSave
+		if (oldData) {
+
+			if (data.started_at == 'nullx') {
+				this.channels.get(platform)?.get(channel)!.streams!.delete(vodId)
+				this.emit('streamDown', channelData, oldData!)
+				return
+			}
+			if (oldData.title !== data.title) {
+				this.emit('title', channelData, streams.get(vodId)!, data.title)
+			}
+			if (oldData.viewers !== data.viewers) {
+				this.emit('viewCount', channelData, streams.get(vodId)!, data.viewers)
+			}
+			if (oldData.category.length < data.category.length) {
+				this.emit('category', channelData, streams.get(vodId)!, data.category.pop()!)
+			}
+			if (oldData.thumbnail !== data.thumbnail) {
+				this.emit('thumbnail', channelData, streams.get(vodId)!, data.thumbnail)
+			}
+			return
+		}
+		this.emit('streamUp', channelData, streams.get(vodId)!)
+
+	}
+
+	public closeTwitch(reason?: string) {
+		this.twitchReconnex.disconnect(reason)
+		this.twitchReconnex?.on('close', (_code, reason) => {
+			this.emit('closeTwitch', reason?.toString() || '')
+		})
+	}
+
+	private updateChannel(platform: FMPlatforms, channel: string, data: RecursivePartial<Channel>) {
+		this.channels.get(platform)?.set(channel, {
+			...this.channels.get(platform)?.get(channel) as Channel,
+			...data as Channel
+		})
+	}
+
+	private async connectTwWebsocket() {
+		if (!this.twitchReconnex.isConnected()) {
+			this.twitchReconnex.open()
+			await this.twitchReconnex?.waitTwitchWSConnected()
+		}
+	}
+
+	public getChannelByUID(platform: FMPlatforms, userId: string): Channel | null {
+		let ret: Channel | null = null
+		this.channels.get(platform)!.forEach(channel => {
+			if (channel.userId == userId) ret = channel as Channel
+		})
+		return ret
+	}
+	public getVodData(platform: FMPlatforms, channel: string, vodId: string) {
+		return this.channels.get(platform)?.get(channel)?.streams?.get(vodId)
+	}
+	public getChannel(platform: FMPlatforms, channel: string) {
+		return this.channels.get(platform)?.get(channel) as Channel | undefined
+	}
+	private subscribeTwitchChannel(userId: string | number) {
+		this.twitchReconnex?.sendOnConnect(payloads.gameBroadcaster(String(userId), 'LISTEN'))
+		this.twitchReconnex?.sendOnConnect(payloads.videoPlayBack(String(userId), 'LISTEN'))
+	}
+	private unSubscribeTwitchChannel(userId: string | number) {
+		this.twitchReconnex?.removeSendOnConnect(payloads.gameBroadcaster(String(userId), 'LISTEN'))
+		this.twitchReconnex?.removeSendOnConnect(payloads.videoPlayBack(String(userId), 'LISTEN'))
+		this.twitchReconnex?.send(payloads.gameBroadcaster(String(userId), 'UNLISTEN'))
+		this.twitchReconnex?.send(payloads.videoPlayBack(String(userId), 'UNLISTEN'))
+	}
+
+
+	private async fetchTwitchData(channel: string) {
+		return await fetchTwitchDataFN(channel, this.twitch?.headers)
+	}
+	private async twitchStreamUp(channel: string) {
+		const data = await this.fetchTwitchData(channel) as FetchTwitchData
+		if (data.streamId == 0) return false;
+		const id = StreamUtils.generateUUID()
+		const { categoryId, categoryImage, categoryName, login, m3u8Url, started_at, streamId, thumbnail, title, userId, viewersCount } = data;
+		const liveData = {
+			id,
+			channel: login,
+			platform: 'twitch',
+			started_at: started_at,
+			thumbnail: thumbnail,
+			title: title,
+			userId: String(userId),
+			viewers: viewersCount || 0,
+			vodId: String(streamId),
+			category: [{
+				id: String(categoryId),
+				image: categoryImage,
+				name: categoryName
+			}],
+			m3u8Url: m3u8Url,
+			chatEnabled: true
+		} satisfies Stream;
+		this.updateStreamData('twitch', channel, String(data.streamId), liveData);
+		return true
+
+	}
+
+	private onCatch(e: Error) {
+		console.log(e)
+		console.log(e.name)
+	}
+
+	/**
+	 * Connect a channel by name. The channel name will be normalized.
+	 */
+	public async connect(channel: string, platform: FMPlatforms): Promise<Channel | void> {
+		this.queue.push(async (cb) => {
+			channel = StreamUtils.normalizeName(channel)
+			const data = this.channels.get(platform)?.get(channel)
+			let userId
+			if (data) {
+				// throw error already connected?
+				return data
+			}
+
+			if (platform == 'twitch') {
+				await this.connectTwWebsocket()
+				const data = await this.fetchTwitchData(channel)
+				if (data.userId == 0 || !data.userId) {
+					// @TODO throw error?
+					// throw new Error(`${channel} not found`)
+					return
+				}
+				userId = String(data.userId)
+				this.subscribeTwitchChannel(data.userId)
+				if (data.started_at !== null) this.twitchStreamUp(channel)
+			} else if (platform == 'youtube') {
+				const exists = await Youtube.channelExists(channel, this.youtube?.headers).catch(this.onCatch)
+				if (!exists) {
+					// @TODO throw error?
+					// throw new Error(`${channel} not found`)
+					return
+				}
+				userId = exists
+				if (!this.youtubeCheckerEnabled) {
+					this.youtubeCheckerEnabled = true
+					setTimeout(() => this.youtubeChecker(), 1_000)
+				}
+			}
+			this.updateChannel(platform, channel, {
+				monitoring: false,
+				username: channel,
+				userId,
+				platform: platform,
+				streams: new Map()
+			})
+			this.emit('connected', this.getChannel(platform, channel)!)
+			cb(null, true)
+		}, { priority: 0, id: channel }).then(res => {
+
+		})
+	}
+
+	public async twitchPlaylist(channel: string) {
+		return await getTwitchPlaylist(channel, this.twitch?.headers)
+	}
+	public async disconnect(channel: string, platform: FMPlatforms) {
+		this.queue.push(async cb => {
+			const data = this.channels.get(platform)?.get(channel)
+			if (data && data?.userId && data.username) {
+				this.channels.get(platform)?.delete(channel)
+				this.emit('disconnected', data as Channel)
+				if (platform == 'twitch') {
+					this.unSubscribeTwitchChannel(data.userId)
+				}
+			} else {
+				// @TODO throw error?
+				// throw new Error(`${channel} not connected`)
+				return
+			}
+			cb(null, true)
+		}, { priority: 0, id: channel })
+	}
+
+	public close() {
+		this.channels.get('twitch')?.forEach(channel => {
+			this.unSubscribeTwitchChannel(channel.userId!)
+		})
+		this.channels = new Map()
+		this.channels.set('twitch', new Map())
+		this.channels.set('youtube', new Map())
+		this.twitchReconnex.disconnect()
+	}
+
+	private async fetchYoutubeChannel(channel: Channel) {
+		const streams = await Youtube.fetchStreams(channel.username, this.youtube?.headers)
+		for (const stream of streams) {
+			const vod = this.getVodData('youtube', channel.username, stream.videoId)
+			if (!vod) {
+				await this.fetchYoutubeVideo(stream.videoId, channel.username)
+			}
+		}
+	}
+	private async fetchYoutubeVideo(videoId: string, channelName: string = '') {
+		const res = await fetchVideo(videoId, this.youtube?.headers)
+		const { reason, status, title, category, live, code } = res
+		// console.log(res)
+		if (!code || code !== 'network_error' && channelName.length > 0) {
+			const channel = this.getChannel('youtube', channelName)
+			const userLiveData = channel?.streams.get(videoId)
+			if (userLiveData && channel) {
+				if (reason || status == 'ERROR') {
+					this.updateStreamData('youtube', channel.username, userLiveData.vodId, { ...userLiveData, started_at: 'nullx' })
+				} else {
+					if (live?.viewers && userLiveData?.viewers !== live.viewers) {
+						this.updateStreamData('youtube', channel.username, userLiveData.vodId, { ...userLiveData, viewers: live.viewers })
+					} else if (title && title !== userLiveData.title) {
+						this.updateStreamData('youtube', channel.username, userLiveData.vodId, { ...userLiveData, title: title })
+						// emit title changed event
+					} else if (category?.name && category.name !== userLiveData.category.pop()?.name) {
+						this.pushLiveCategory('youtube', channel.username, userLiveData.vodId, category)
+					}
+				}
+			} else {
+				if (!reason && status !== 'ERROR' && live?.isLiveNow && channel) {
+					const id = StreamUtils.generateUUID()
+					const { channelId, live, title, thumbnails } = res
+					const liveData = {
+						id,
+						channel: channel.username,
+						platform: 'youtube',
+						started_at: live?.startTimestamp.toString()!,
+						thumbnail: thumbnails?.pop()?.url.toString()!,
+						title: title!,
+						userId: channelId!,
+						viewers: live?.viewers || 0,
+						vodId: videoId,
+						chatEnabled: live?.chatEnabled!,
+						category: [{
+							id: category?.id!,
+							image: category?.image!,
+							name: category?.name!
+						}],
+						m3u8Url: live?.dashManifestUrl.toString()
+					} satisfies Stream;
+					this.updateStreamData('youtube', channel.username, videoId, liveData);
+				}
+			}
+		}
+		return res
+	}
+
+	private async youtubeChecker() {
+		if (this.youtubeCheckerEnabled) {
+			if (this.channels.get('youtube')?.size == 0) {
+				this.youtubeCheckerEnabled = false
+				return
+			}
+			// check if has youtube channels connected
+			for await (const [_id, channel] of this.channels.get('youtube')!) {
+				await this.fetchYoutubeChannel(channel as Channel)
+				const streams = Array.from(channel.streams?.values()!)
+				for await (const stream of streams) {
+					await sleep(this.youtube.intervalChecker)
+					await this.fetchYoutubeVideo(stream.vodId, channel.username)
+				}
+
+			}
+			setTimeout(() => this.youtubeChecker(), this.youtube?.intervalChecker)
+		}
+	}
+
+	public async fetchTwitch(channel: string) {
+		const data = await this.fetchTwitchData(channel) as FetchTwitchData
+		const vod = this.getVodData('twitch', channel, String(data.streamId))
+		if (vod && vod?.vodId) {
+			if (data.started_at !== null) {
+				const { m3u8Url, thumbnail, title } = data;
+				const liveData = {
+					...vod,
+					thumbnail: thumbnail,
+					title: title,
+					m3u8Url: m3u8Url
+				} satisfies Stream;
+				this.updateStreamData('twitch', channel, String(data.streamId), liveData);
+			} else {
+				this.updateStreamData('twitch', channel, vod.vodId, { ...vod!, started_at: 'nullx' })
+			}
+		} else {
+			const channelConnected = this.getChannel('twitch', channel)
+			if (data?.started_at !== null && channelConnected?.username) this.twitchStreamUp(channel)
+		}
+		return data
+
+	}
+
+	public async fetchYoutube(videoId: string, channel?: string) {
+		return this.fetchYoutubeVideo(videoId, channel)
+	}
+
 }

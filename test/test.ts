@@ -1,61 +1,82 @@
 
 import { FlowMonitor } from '../src';
 
-const fMonitor = new FlowMonitor({
+const monitor = new FlowMonitor({
   twitch: {
     headers: {
-      Authorization: 'OAuth ', // Authorization to get the m3u8 url without ads if you are registered or have turbo, but not a mandatory parameter 
-    } // optional http request headers,
-  },
-  youtube: {
-    headers: {}, // optional http request headers,
-    intervalChecker: 10 * 1000 // Time in milliseconds, default is 5000 = 5s
+      Authorization: 'OAuth ',
+      'X-Device-Id': 'twitch-web-wall-mason',
+      'Device-ID': 'twitch-web-wall-mason'
+    }
   }
 })
-fMonitor.start()
 
-fMonitor.on('twitchError', (error, status, message) => {
-  console.log(error, status, message)
+monitor.on('disconnected', (channel) => {
+  console.log(`channel disconnected ${channel.username}/${channel.platform}`)
+  // monitor.closeTwitch()
 })
-
-fMonitor.on('start', () => {
-
-})
-
-fMonitor.on('newChannel', ({ name, platform }) => {
-  console.log(name, platform)
-})
-fMonitor.on('streamUp', (livedata) => {
-  console.log('streamUp', livedata)
-})
-fMonitor.on('category', (livedata) => {
-  console.log('category', livedata)
-})
-fMonitor.on('streamDown', (livedata) => {
-  console.log('streamDown', livedata)
-})
-fMonitor.on('title', (livedata) => {
-  console.log('title', livedata)
-})
-fMonitor.on('viewerCount', (livedata) => {
-  console.log('viewerCount', livedata)
+monitor.on('connected', (channel) => {
+  console.log(`channel connected ${channel.username}/${channel.platform}`)
 })
 
-fMonitor.on('disconnectChannel', ({ name, platform }) => {
-  console.log('channel disconnected', name, platform)
-})
-fMonitor.on('close', () => {
 
-})
-fMonitor.connect('@LofiGirl', 'youtube')
-// fMonitor.connect('pedrosemfreio', 'twitch')
+monitor.on('streamUp', (channel, vod) => {
+  console.log(`Stream started on channel ${channel.username} (${channel.platform}) ${vod.vodId}`);
+  console.log(vod.m3u8Url)
+});
 
-fMonitor.start()
-// console.log(fMonitor.livedata('@LofiGirl', 'youtube'))
+monitor.on('streamDown', (channel, vod) => {
+  console.log(`Stream ended on channel ${channel.username} (${channel.platform}) ${vod.vodId}`);
+});
+
+monitor.on('viewCount', (channel, vod, count) => {
+  console.log(`Channel ${channel.username} (${channel.platform}) now has ${count} viewers`);
+});
+
+monitor.on('title', (channel, vod, newTitle) => {
+  console.log(`Channel ${channel.username} (${channel.platform}) changed the title to "${newTitle}"`);
+});
+
+monitor.on('category', (channel, vod, newCategory) => {
+  console.log(`Channel ${channel.username} (${channel.platform}) changed the category to ${newCategory}`);
+});
+
+monitor.on('thumbnail', (channel, vod, thumbnail) => {
+  console.log(`Channel ${channel.username} (${channel.platform}) updated the thumbnail to ${thumbnail}`);
+});
+
+monitor.on('twitchSocketOpen', () => {
+  console.log('WebSocket connection to Twitch is opened');
+});
+
+monitor.on('connected', (channel) => {
+  console.log(`Connected to ${channel.username} (${channel.platform})`);
+});
+
+monitor.on('disconnected', (channel) => {
+  console.log(`Disconnected from ${channel.username} (${channel.platform})`);
+});
+
+monitor.on('close', (code, reason, wasClean) => {
+  console.log(`Connection closed: ${reason} (clean: ${wasClean})`);
+});
+
+monitor.on('closeTwitch', (reason) => {
+  console.log(`Twitch connection closed: ${reason}`);
+});
+
+monitor.on('error', (event) => {
+  console.error(`Error: ${event}`);
+});
+monitor.connect('@lofigirl', 'youtube')
+// monitor.connect('yayahuz', 'twitch')
+// // monitor.connect('choke7', 'twitch')
+// // monitor.connect('piratesoftware', 'twitch')
+
 
 // setTimeout(() => {
-//   const res = fMonitor.livedata('LofiGirl', 'youtube')
-//   console.log(res)
-//   fMonitor.disconnect('LofiGirl', 'youtube')
-//   fMonitor.disconnect('pedrosemfreio', 'twitch')
-// }, 30000)
+//   console.log(monitor.channels.values())
+//   monitor.disconnect('@lofigirl', 'youtube')
+//   console.log(monitor.channels.values())
+// }, 10_000)
+

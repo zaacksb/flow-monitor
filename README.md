@@ -6,15 +6,15 @@
 
   <h3 align="center">Flow Monitor</h3>
 
-  <p align="center">  
-FlowMonitor is a library dedicated to simplifying monitoring live streams across multiple platforms. With easy integration and real-time notifications, FlowMonitor offers an efficient solution for monitoring key events such as start, end and title changes, allowing you to maintain clear control over the status of your live streams. Ideal for developers looking for a hassle-free and effective approach to managing streaming data.
+  <p align="center">
+    FlowMonitor is a library dedicated to simplifying the monitoring of live streams across multiple platforms. With easy integration and real-time notifications, it offers an efficient solution for tracking key events, allowing you to maintain clear control over the status of your live streams.
     <br/>
     <br/>
     <a href="https://github.com/zaacksb/flow-monitor/blob/main/README.md"><strong>Explore the docs »</strong></a>
     <br/>
     <br/>
     <a href="https://github.com/zaacksb/flow-monitor/issues">Report Bug</a>
-    .
+    ·
     <a href="https://github.com/zaacksb/flow-monitor/issues">Request Feature</a>
   </p>
 </p>
@@ -22,192 +22,262 @@ FlowMonitor is a library dedicated to simplifying monitoring live streams across
 ![Contributors](https://img.shields.io/github/contributors/zaacksb/flow-monitor?color=dark-green) ![Issues](https://img.shields.io/github/issues/zaacksb/flow-monitor) ![License](https://img.shields.io/github/license/zaacksb/flow-monitor)
 [![npm version](https://img.shields.io/npm/v/flow-monitor.svg?style=flat)](https://www.npmjs.com/package/flow-monitor)
 
+---
+
+## Table of Contents
+
+- [About The Project](#about-the-project)
+- [Key Changes in This Version](#key-changes-in-this-version)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Detailed Usage](#detailed-usage)
+- [Events](#events)
+- [API Reference](#api-reference)
+- [Types](#types)
+- [Contribution](#contribution)
+- [License](#license)
+
 ## About The Project
 
-This library was created to facilitate the use of websocket, focused more specifically on reconnection, with it it is possible to send parameters that can be used for authentication, and if the connection is closed, when the connection is resumed, it will resend the data for authentication again
+FlowMonitor is a comprehensive library designed for monitoring live streams on Twitch and YouTube. It provides real-time notifications for various events, including streams starting and stopping, changes in view counts, titles, and categories. Its main goal is to provide a simple and efficient way to integrate stream monitoring into your projects.
 
-## Getting Started
+## Key Changes in This Version
 
-### Installation
+This version represents a significant refactoring of the library, with a focus on improving the API and event structure.
 
-First install our library
+### What's New
 
-```sh
+*   **New `Logger` class**: For more detailed and configurable logging.
+*   **New `Queue` system**: Manages asynchronous operations to prevent race conditions.
+*   **New `twitchPlaylist` method**: To fetch the m3u8 playlist for a Twitch stream directly.
+*   **Category History**: The `category` property on the `vod` object is now an array, storing the history of categories for a stream.
+*   **More Granular Events**: Events now provide more detailed and structured data. For example, the `streamUp` event now passes a `vod` object with rich information about the stream.
+*   **Improved Error Handling**: The library now has more specific error events, making it easier to handle issues with Twitch and YouTube connections.
+*   **New `thumbnail` event**: A new event to notify when a stream's thumbnail changes.
+*   **Direct Fetch Methods**: New `fetchTwitch` and `fetchYoutube` methods to get data on demand.
+
+### What's Changed
+
+*   **API Simplification**: The `start()` method has been removed. The library now automatically starts monitoring when you connect to a channel.
+*   **Event Renaming and Structure**:
+    *   `newChannel` is now `connected`.
+    *   `disconnectChannel` is now `disconnected`.
+    *   `twitchError` is now `error`.
+    *   Events like `streamUp`, `streamDown`, `viewCount`, `title`, and `category` now have a consistent signature, passing the `channel` and `vod` objects.
+*   **Dependencies**: `axios` and `async-lock` have been removed in favor of native `fetch` and a new `Queue` implementation. `eventemitter3` is now used for event management.
+
+### What's Removed
+
+*   **`start()` method**: No longer needed.
+*   **`livedata()` method**: You can now get the channel data directly from the `channels` property.
+*   **YouTube Storyboard**: The functionality to extract storyboards from YouTube videos has been removed.
+
+## Installation
+
+To install FlowMonitor, use npm:
+
+```bash
 npm install flow-monitor
 ```
 
-## Usage
+## Quick Start
 
-Import the library
+Here's a quick example to get you started with FlowMonitor:
 
-```js
-import { FlowMonitor } from 'flow-monitor'
+```typescript
+import { FlowMonitor, Logger, LogLevel } from 'flow-monitor';
+
+const fm = new FlowMonitor({
+    log: new Logger(LogLevel.Info),
+    youtube: {
+        intervalChecker: 10000,
+        headers: { 'User-Agent': 'FlowMonitor' }
+    },
+    twitch: {
+        headers: { 
+            'Client-ID': 'your-twitch-client-id', 
+            'Authorization': 'Bearer your-twitch-token' 
+        }
+    }
+});
+
+fm.on('streamUp', (channel, vod) => {
+    console.log(`Stream started on channel ${channel.username}`);
+});
+
+fm.connect('channel_name', 'twitch');
+fm.connect('channel_name', 'youtube');
 ```
 
-instantiate the class
+## Detailed Usage
 
-```js
-const fMonitor = new FlowMonitor({
-  twitch: {
-    headers: {
-      Authorization: 'OAuth ', // Authorization to get the m3u8 url without ads if you are registered or have turbo, but not a mandatory parameter
-    }, // optional http request headers,
-  },
-  youtube: {
-    headers: {}, // optional http request headers,
-    intervalChecker: 10 * 1000, // Time in milliseconds, default is 5000 = 5s
-  },
-})
+### Initialization
+
+To begin, instantiate the `FlowMonitor` class with your desired options, as shown in the [Quick Start](#quick-start) section. This single instance will be used to manage all your channel monitoring.
+
+### Connecting to a Channel
+
+To start monitoring a specific channel:
+
+```typescript
+fm.connect('channel_name', 'twitch');
+fm.connect('channel_name', 'youtube');
 ```
 
-#### Connect to channels
+### Disconnecting from a Channel
 
-```js
-fMonitor.connect('LofiGirl', 'youtube')
-fMonitor.connect('zvods', 'twitch')
+To stop monitoring a specific channel:
+
+```typescript
+fm.disconnect('channel_name', 'twitch');
+fm.disconnect('channel_name', 'youtube');
 ```
 
-#### Start monitoring
+### Closing Connections
 
-```js
-fMonitor.start()
+To close all connections and clear all data:
+
+```typescript
+fm.close();
 ```
 
-### Event Handling
+## Events
 
-Returns twitch request errors, such as authentication error when passing authorization
+FlowMonitor emits several events that you can listen to and respond accordingly:
 
-```js
-fMonitor.on('twitchError', (error, status, message) => {
-  console.log(error, status, message)
-})
+- `streamUp`: Emitted when a stream starts.
+- `streamDown`: Emitted when a stream ends.
+- `viewCount`: Emitted when the view count changes.
+- `category`: Emitted when the stream's category changes.
+- `title`: Emitted when the stream's title changes.
+- `thumbnail`: Emitted when the stream's thumbnail changes.
+- `twitchSocketOpen`: Emitted when the WebSocket connection to Twitch is opened.
+- `twitchSocketClose`: Emitted when the WebSocket connection to Twitch is closed.
+- `connected`: Emitted when a channel is connected.
+- `disconnected`: Emitted when a channel is disconnected.
+- `close`: Emitted when a connection is closed.
+- `closeTwitch`: Emitted when the connection to Twitch is closed.
+- `error`: Emitted when an error occurs.
+
+### Example of Using Events
+
+```typescript
+fm.on('streamUp', (channel, vod) => {
+    console.log(`Stream started on channel ${channel.username}`);
+});
+
+fm.on('streamDown', (channel, vod) => {
+    console.log(`Stream ended on channel ${channel.username}`);
+});
+
+fm.on('viewCount', (channel, vod, count) => {
+    console.log(`Channel ${channel.username} now has ${count} viewers`);
+});
+
+fm.on('title', (channel, vod, newTitle) => {
+    console.log(`Channel ${channel.username} changed the title to ${newTitle}`);
+});
 ```
 
-When you call the start function and start
+## API Reference
 
-```js
-fMonitor.on('start', () => {
-  console.log('Flow monitor started')
-})
+### Constructor
+
+```typescript
+constructor(opts: ClientOptions = {})
 ```
 
-When a new channel is connected
+- `opts`: Options object to configure FlowMonitor.
+  - `log`: Logger instance.
+  - `youtube`: Settings for YouTube monitoring.
+  - `twitch`: Settings for Twitch monitoring.
 
-```js
-fMonitor.on('newChannel', ({ name, platform }) => {
-  console.log(name, platform)
-})
-```
+### Methods
 
-Confirmation when the channel is disconnected using the `disconnect` function
+- `connect(channel: string, platform: FMPlatforms)`: Connects to a channel for monitoring.
+- `disconnect(channel: string, platform: FMPlatforms)`: Disconnects from a channel.
+- `close()`: Closes all connections.
+- `closeTwitch(reason?: string)`: Closes the connection to Twitch.
+- `fetchTwitch(channel: string)`: Fetches data for a Twitch channel.
+- `fetchYoutube(videoId: string, channel?: string)`: Fetches data for a YouTube video.
+- `twitchPlaylist(channel: string)`: Fetches the m3u8 playlist for a Twitch stream.
 
-```js
-fMonitor.on('disconnectChannel', ({ name, platform }) => {
-  console.log('Channel disconnected', name, platform)
-})
-```
+## Types
 
-When the flow monitor is finished with the `close` function
+### ClientOptions
 
-```js
-fMonitor.on('close', () => {
-  console.log('Flow monitor has been closed')
-})
-```
-
-### These upcoming events all return an object with the current stream information
-
-livedata structure:
-
-```ts
-export type LMEventTypes = 'streamUp' | 'streamDown' | 'viewerCount' | 'title' | 'category'
-export type LMPlatforms = 'twitch' | 'youtube' | 'kick'
-export type LMCategory = {
-  image: string
-  name: string
-  id: string
+```typescript
+interface ClientOptions {
+    log?: Logger;
+    youtube?: {
+        intervalChecker?: number;
+        headers?: HeadersInit;
+    };
+    twitch?: {
+        headers?: HeadersInit;
+    };
 }
-
-export type LMLiveData = {
-  event?: LMEventTypes
-  platform: LMPlatforms
-  channel: string
-  title: string
-  category: LMCategory
-  viewers: number
-  thumbnail: string
-  started_at: string
-  vodId: string
-  m3u8Url?: string
-}
 ```
 
-When the broadcast opens, if you connect the channel and it is already live, you will receive the same
+### FlowMonitorEvents
 
-```js
-fMonitor.on('streamUp', (livedata) => {
-  console.log('streamUp', livedata)
-})
+```typescript
+type FlowMonitorEvents = {
+    streamUp: [channel: Omit<Channel, 'streams'>, vod: Stream];
+    streamDown: [channel: Omit<Channel, 'streams'>, vod: Stream];
+    viewCount: [channel: Omit<Channel, 'streams'>, vod: Stream, count: number];
+    category: [channel: Omit<Channel, 'streams'>, vod: Stream, newcategory: FMCategory];
+    title: [channel: Omit<Channel, 'streams'>, vod: Stream, newTitle: string];
+    thumbnail: [channel: Omit<Channel, 'streams'>, vod: Stream, thumbnail: string];
+    twitchSocketOpen: [uri: string];
+    twitchSocketClose: [code: number, reason?: string];
+    connected: [channel: Channel];
+    disconnected: [channel: Channel];
+    close: [code: number, reason: string, wasClean: boolean];
+    closeTwitch: [reason: string];
+    error: [event: string];
+};
 ```
 
-When the transmission is finished
+### Stream
 
-```js
-fMonitor.on('streamDown', (livedata) => {
-  console.log('streamDown', livedata)
-})
+```typescript
+type Stream = Omit<FMLiveData, 'event'>;
 ```
 
-When the category is changed
+### Streams
 
-```js
-fMonitor.on('category', (livedata) => {
-  console.log('category', livedata)
-})
+```typescript
+type Streams = Map<string, Stream>;
 ```
 
-Broadcast title changed
+### Channel
 
-```js
-fMonitor.on('title', (livedata) => {
-  console.log('title', livedata)
-})
+```typescript
+type Channel = {
+    monitoring?: boolean;
+    platform: FMPlatforms;
+    username: string;
+    userId: string;
+    streams: Streams;
+};
 ```
 
-Viewer count changes
+### Channels
 
-```js
-fMonitor.on('viewerCount', (livedata) => {
-  console.log('viewerCount', livedata)
-})
+```typescript
+type Channels = Map<FMPlatforms, Map<string, Partial<Channel>>>;
 ```
 
-### Additional Functions
+## Contribution
 
-- `disconnect`
-  Disconnects a channel from the flow monitor
-
-  ```js
-  fMonitor.disconnect('@LofiGirl', 'youtube')
-  ```
-
-- `close`
-  Removes all channels and stops monitoring
-
-  ```js
-  fMonitor.close()
-  ```
-
-- `livedata`
-  Returns transmission data if already saved
-
-  ```js
-  fMonitor.livedata('LofiGirl', 'youtube')
-  ```
+To contribute to this project, please follow the guidelines described in the CONTRIBUTING.md file.
 
 ## License
 
-Distributed under the MIT License. See [LICENSE](https://github.com/zaacksb/flow-monitor/blob/main/LICENSE) for more information.
+This project is licensed under the MIT License. See the LICENSE file for more details.
+
+---
 
 ## Authors
 
